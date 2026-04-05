@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isVendor() {
+      return isSignedIn() && userRole() == 'vendor';
+    }
+
+    function isCustomer() {
+      return isSignedIn() && userRole() == 'customer';
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && isOwner(uid);
+      allow create: if isSignedIn() && isOwner(uid);
+      allow update: if isSignedIn() && isOwner(uid)
+        && !('role' in request.resource.data.diff(resource.data).affectedKeys());
+      allow delete: if false;
+    }
+
+    match /vendors/{vendorId} {
+      allow read: if true;
+      allow create: if isVendor() && isOwner(vendorId);
+      allow update: if isVendor() && isOwner(vendorId)
+        && !('averageRating' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('reviewCount' in request.resource.data.diff(resource.data).affectedKeys());
+      allow delete: if isVendor() && isOwner(vendorId);
+
+      match /reviews/{reviewId} {
+        allow read: if true;
+        allow create: if isCustomer()
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.rating >= 1
+          && request.resource.data.rating <= 5
+          && request.resource.data.text.size() <= 500;
+        allow update: if isCustomer()
+          && resource.data.authorId == request.auth.uid;
+        allow delete: if isCustomer()
+          && resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    match /locations/{vendorId} {
+      allow read: if true;
+      allow write: if isVendor() && isOwner(vendorId);
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn()
+        && resource.data.recipientId == request.auth.uid;
+      allow write: if false;
+    }
+  }
+}
